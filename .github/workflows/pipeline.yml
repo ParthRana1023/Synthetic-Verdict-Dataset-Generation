@@ -2,8 +2,8 @@ name: Run Courtroom Pipeline
 
 on:
   schedule:
-    - cron: "*/30 * * * *" # run every 30 minutes
-  workflow_dispatch: # allow manual trigger
+    - cron: "30 */2 * * *" # every 2 hours at xx:30 UTC = every 2 hours IST
+  workflow_dispatch:
 
 jobs:
   run:
