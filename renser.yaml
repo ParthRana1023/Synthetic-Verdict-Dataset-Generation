@@ -1,7 +1,0 @@
-services:
-  - type: worker
-    name: courtroom-pipeline
-    env: python
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "python pipeline.py"
-    plan: free

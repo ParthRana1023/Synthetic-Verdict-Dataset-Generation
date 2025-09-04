@@ -1,0 +1,28 @@
+name: Run Courtroom Pipeline
+
+on:
+  schedule:
+    - cron: "*/30 * * * *" # run every 30 minutes
+  workflow_dispatch: # allow manual trigger
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run pipeline
+        env:
+          MONGODB_URL: ${{ secrets.MONGODB_URL }}
+          GROQ_API_KEYS: ${{ secrets.GROQ_API_KEYS }}
+        run: python pipeline.py
