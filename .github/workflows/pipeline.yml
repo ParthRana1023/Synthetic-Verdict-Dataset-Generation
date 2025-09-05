@@ -2,7 +2,7 @@ name: Run Courtroom Pipeline
 
 on:
   schedule:
-    - cron: "30 */2 * * *" # every 2 hours at xx:30 UTC = every 2 hours IST
+    - cron: "30 */1 * * *" # every 2 hours at xx:30 UTC = every 2 hours IST
   workflow_dispatch:
 
 jobs:
@@ -25,4 +25,5 @@ jobs:
         env:
           MONGODB_URL: ${{ secrets.MONGODB_URL }}
           GROQ_API_KEYS: ${{ secrets.GROQ_API_KEYS }}
+          GROQ_MODELS: ${{ secrets.GROQ_MODELS }}
         run: python pipeline.py
