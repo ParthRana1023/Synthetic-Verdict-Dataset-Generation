@@ -2,7 +2,7 @@ import re
 from typing import List, Dict, Optional, Union
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from llm import llm
+from llm import get_llm
 
 class CaseAnalysisService:
     @staticmethod
@@ -79,7 +79,7 @@ class CaseAnalysisService:
         ])
 
         try:
-            chain = analysis_prompt | llm | StrOutputParser()
+            chain = analysis_prompt | get_llm() | StrOutputParser()
             response = chain.invoke({})
 
             response = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL).strip()

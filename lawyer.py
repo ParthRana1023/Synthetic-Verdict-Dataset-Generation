@@ -1,32 +1,17 @@
 import logging
 import re
 import time
+import asyncio
+import logging
+import json
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from llm import llm
+from llm import get_llm
+from llm_manager import rotate_key, rotate_model
 
 logger = logging.getLogger(__name__)
 
-# ---- Retry Decorator for Rate Limit Handling ----
-def retry_with_backoff(func):
-    async def wrapper(*args, **kwargs):
-        retries, delay = 3, 2
-        for attempt in range(retries):
-            try:
-                return await func(*args, **kwargs)
-            except Exception as e:
-                if "rate limit" in str(e).lower():
-                    logger.warning(f"Rate limit hit. Retrying in {delay} seconds... (Attempt {attempt+1}/{retries})")
-                    time.sleep(delay)
-                    delay *= 2
-                else:
-                    logger.error(f"LLM Error: {e}")
-                    return "I apologize, but I'm unable to process this request right now. Please try again later."
-        return "I apologize, but retries failed. Please try again later."
-    return wrapper
-
 # ---- Argument Generation ----
-@retry_with_backoff
 async def generate_counter_argument(history: str, last_argument: str, ai_role: str = None, user_role: str = None, case_details: str = None) -> str:
     try:
         template = '''You are an experienced and assertive Indian trial lawyer representing the {ai_role}. 
@@ -46,7 +31,7 @@ async def generate_counter_argument(history: str, last_argument: str, ai_role: s
             ("system", template)
         ]) 
 
-        chain = prompt | llm | StrOutputParser()
+        chain = prompt | get_llm() | StrOutputParser()
 
         response = chain.invoke({
             "ai_role": ai_role,
@@ -63,7 +48,6 @@ async def generate_counter_argument(history: str, last_argument: str, ai_role: s
         return "I apologize, but I'm unable to generate a counter argument at this time. Please try again later."
 
 # ---- Opening Statement ----
-@retry_with_backoff
 async def opening_statement(ai_role: str, case_details: str, user_role: str) -> str:
     try:
         template = '''You are an Indian lawyer from the {ai_role}'s side. 
@@ -77,7 +61,7 @@ async def opening_statement(ai_role: str, case_details: str, user_role: str) -> 
             ("system", template)
         ])
 
-        chain = prompt | llm | StrOutputParser()
+        chain = prompt | get_llm() | StrOutputParser()
 
         response = chain.invoke({
             'ai_role': ai_role,
@@ -92,9 +76,19 @@ async def opening_statement(ai_role: str, case_details: str, user_role: str) -> 
         return "I apologize, but I'm unable to generate an opening statement at this time. Please try again later."
 
 # ---- Closing Statement ----
-@retry_with_backoff
 async def closing_statement(history: str, ai_role: str, user_role: str) -> str:
     try:
+        # Truncate history if it's too long to avoid token limits
+        if len(history) > 15000:  # Approximate token limit safety
+            logger.info(f"History too long ({len(history)} chars), truncating for closing statement")
+            # Keep the beginning context and the most recent arguments
+            parts = history.split('\n\n')
+            if len(parts) > 6:
+                # Keep intro + last 5 argument blocks
+                truncated = parts[0] + '\n\n' + '\n\n'.join(parts[-5:])
+                history = truncated
+                logger.info(f"Truncated history to {len(history)} chars")
+
         template = '''You are an Indian lawyer from the {ai_role}'s side. 
         Provide a powerful closing statement (around 250 words) based on the full case history: {history}. 
         Summarize your strongest points and highlight evidence. 
@@ -107,7 +101,7 @@ async def closing_statement(history: str, ai_role: str, user_role: str) -> str:
             ("system", template)
         ])
 
-        chain = prompt | llm | StrOutputParser()
+        chain = prompt | get_llm() | StrOutputParser()
 
         response = chain.invoke({
             'ai_role': ai_role,
@@ -116,7 +110,14 @@ async def closing_statement(history: str, ai_role: str, user_role: str) -> str:
         })
 
         response = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL).strip()
+        
+        # Verify we got a valid response
+        if not response or len(response) < 50 or "apologize" in response.lower():
+            logger.warning(f"Received potentially invalid closing statement: {response[:50]}...")
+            raise ValueError("Invalid closing statement response")
+            
         return response
     except Exception as e:
+        # Let the retry decorator handle this exception
         logger.error(f"Error generating closing statement: {str(e)}")
-        return "I apologize, but I'm unable to generate a closing statement at this time. Please try again later."
+        raise e

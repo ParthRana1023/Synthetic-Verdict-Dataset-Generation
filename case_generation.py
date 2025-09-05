@@ -2,7 +2,7 @@
 import random
 import string
 import re
-from llm import llm
+from llm import get_llm
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
@@ -17,7 +17,7 @@ async def random_names():
         ('system', template1)
     ])
 
-    chain = prompt | llm | StrOutputParser()
+    chain = prompt | get_llm() | StrOutputParser()
 
     try:
         # Use await for async chain invocation as llm is ChatOpenAI and the function is async
@@ -42,7 +42,7 @@ async def random_cities():
         ('system', template1)
     ])
 
-    chain = prompt | llm | StrOutputParser()
+    chain = prompt | get_llm() | StrOutputParser()
 
     try:
         # Use await for async chain invocation as llm is ChatOpenAI and the function is async
@@ -203,7 +203,7 @@ async def generate_case(sections: int, numbers: list[int]) -> dict:
         ('system', template)
     ])
 
-    chain = prompt | llm | StrOutputParser()
+    chain = prompt | get_llm() | StrOutputParser()
 
     try:
         # Use await for async chain invocation as llm is ChatOpenAI and the function is async
