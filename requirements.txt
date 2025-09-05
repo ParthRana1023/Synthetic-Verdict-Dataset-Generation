@@ -1,6 +1,5 @@
 asyncio
 pymongo
 python-dotenv
-bson
 langchain-groq
 langchain-core
