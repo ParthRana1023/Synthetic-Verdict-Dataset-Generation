@@ -7,7 +7,6 @@ from pymongo import MongoClient, errors
 from bson import ObjectId
 from dotenv import load_dotenv
 from llm_manager import rotate_key, rotate_model, print_rotation_status
-import json
 from case_generation import generate_case
 from lawyer import opening_statement, generate_counter_argument, closing_statement
 
