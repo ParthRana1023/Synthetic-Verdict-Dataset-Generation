@@ -61,64 +61,42 @@ def print_final_rotation_status(initial_stats):
     return final_stats
 
 # ---- Retry Decorator ----
-def retry_with_backoff(func):
+def handle_rate_limit(func):
     async def wrapper(*args, **kwargs):
-        max_retries, delay = 5, 2  # Increased retries from 3 to 5
-        for attempt in range(max_retries):
+        try:
+            return await func(*args, **kwargs)
+        except Exception as e:
+            error_text = str(e)
+            error_str = error_text.lower()
+
+            # Try to parse JSON to check error type
             try:
-                return await func(*args, **kwargs)
-            except Exception as e:
-                error_text = str(e)
-                error_str = error_text.lower()
+                error_json = json.loads(error_text.split("Error code:")[-1].strip())
+            except Exception:
+                error_json = {}
 
-                # Try to parse JSON to check error type
-                try:
-                    error_json = json.loads(error_text.split("Error code:")[-1].strip())
-                except Exception:
-                    error_json = {}
-
-                if "rate limit" in error_str:
-                    # Check for daily token exhaustion
-                    if "tokens per day" in error_str or error_json.get("error", {}).get("code") == "rate_limit_exceeded":
-                        # For any TPD (tokens per day) error, always rotate model
-                        print(f"⚠️ [DEBUG] Daily token limit reached. Rotating model... (Attempt {attempt+1}/{max_retries})")
-                        print_rotation_status()  # Print current status before rotation
-                        rotate_model()
-                        await asyncio.sleep(20)  # Wait for 20 seconds after model rotation
-                    else:
-                        print(f"⚠️ [DEBUG] Short-term rate limit hit. Rotating key... (Attempt {attempt+1}/{max_retries})")
-                        print_rotation_status()  # Print current status before rotation
-                        rotate_key()
-                        await asyncio.sleep(10)  # Wait for 10 seconds after key rotation
-                    continue
-
-                elif "503" in error_str or "over capacity" in error_str:
-                    print(f"⚠️ [DEBUG] 503 error. Retrying in {delay}s (Attempt {attempt+1}/{max_retries})")
-                    await asyncio.sleep(delay)
-                    delay *= 2
-                    
-                    # If we've tried multiple times with backoff, try rotating
-                    if attempt >= 2:
-                        print(f"⚠️ [DEBUG] Multiple 503 errors. Trying key rotation...")
-                        print_rotation_status()  # Print current status before rotation
-                        rotate_key()
-
+            if "rate limit" in error_str:
+                # Check for daily token exhaustion
+                if "tokens per day" in error_str or error_json.get("error", {}).get("code") == "rate_limit_exceeded":
+                    # For any TPD (tokens per day) error, always rotate model
+                    print(f"⚠️ [DEBUG] Daily token limit reached. Rotating model...")
+                    print_rotation_status()  # Print current status before rotation
+                    rotate_model()
+                    await asyncio.sleep(20)  # Wait for 20 seconds after model rotation
                 else:
-                    print(f"❌ [DEBUG] Other error: {e} (Attempt {attempt+1}/{max_retries})")
-                    if attempt < max_retries - 1:
-                        # For unknown errors, try rotating key first, then model if needed
-                        print_rotation_status()  # Print current status before rotation
-                        rotate_key()
-                        await asyncio.sleep(5)
-                        continue
-                    
-                # If we reach the last attempt and still have errors, raise the exception
-                if attempt == max_retries - 1:
-                    print(f"⛔ [DEBUG] All retry attempts failed. Raising exception.")
-                    raise e
-        
-        # This should never be reached due to the exception above
-        raise Exception("Maximum retries exceeded")
+                    print(f"⚠️ [DEBUG] Short-term rate limit hit. Rotating key...")
+                    print_rotation_status()  # Print current status before rotation
+                    rotate_key()
+                    await asyncio.sleep(10)  # Wait for 10 seconds after key rotation
+                return None  # Signal that rate limit was hit and no retry
+
+            elif "503" in error_str or "over capacity" in error_str:
+                print(f"❌ [DEBUG] 503 error or over capacity. Not retrying.")
+                raise e # Re-raise immediately, no retries
+
+            else:
+                print(f"❌ [DEBUG] Other error: {e}. Not retrying.")
+                raise e # Re-raise immediately, no retries
     return wrapper
 
 def is_valid_response(text: str) -> bool:
@@ -149,7 +127,7 @@ def save_progress(case_id, plaintiff_args, defendant_args, status="in-progress")
         print(f"❌ MongoDB Update Error: {e}")
 
 # ---- Generate / Complete Arguments for Case ----
-@retry_with_backoff
+@handle_rate_limit
 async def generate_arguments_for_case(case: dict):
     case_details = case["details"]
     case_id = case["_id"]
@@ -169,8 +147,8 @@ async def generate_arguments_for_case(case: dict):
             plaintiff_args.append(resp)
             save_progress(case_id, plaintiff_args, defendant_args)
         else:
-            print("⚠️ Failed to generate valid plaintiff opening statement. Will retry.")
-            return False  # Signal retry needed
+            print("⚠️ Failed to generate valid plaintiff opening statement. Skipping case.")
+            return None  # Signal to skip this case
 
     if len(defendant_args) == 0:
         print("🟢 Generating Defendant Opening...")
@@ -179,8 +157,8 @@ async def generate_arguments_for_case(case: dict):
             defendant_args.append(resp)
             save_progress(case_id, plaintiff_args, defendant_args)
         else:
-            print("⚠️ Failed to generate valid defendant opening statement. Will retry.")
-            return False  # Signal retry needed
+            print("⚠️ Failed to generate valid defendant opening statement. Skipping case.")
+            return None  # Signal to skip this case
 
     # Step 2: Arguments (2 rounds)
     history = plaintiff_args + defendant_args
@@ -199,8 +177,8 @@ async def generate_arguments_for_case(case: dict):
             history.append(arg_p)
             save_progress(case_id, plaintiff_args, defendant_args)
         else:
-            print(f"⚠️ Failed to generate valid plaintiff argument {round_num}. Will retry.")
-            return False  # Signal retry needed
+            print(f"⚠️ Failed to generate valid plaintiff argument {round_num}. Skipping case.")
+            return None  # Signal to skip this case
 
         print(f"🔶 Defendant Counter {round_num}")
         arg_d = await generate_counter_argument(
@@ -215,8 +193,8 @@ async def generate_arguments_for_case(case: dict):
             history.append(arg_d)
             save_progress(case_id, plaintiff_args, defendant_args)
         else:
-            print(f"⚠️ Failed to generate valid defendant counter {round_num}. Will retry.")
-            return False  # Signal retry needed
+            print(f"⚠️ Failed to generate valid defendant counter {round_num}. Skipping case.")
+            return None  # Signal to skip this case
 
     # Step 3: Closings
     if len(plaintiff_args) < 4:
@@ -251,7 +229,7 @@ async def generate_arguments_for_case(case: dict):
         return False  # Signal retry needed
 
 # ---- Generate a New Case ----
-@retry_with_backoff
+@handle_rate_limit
 async def run_single_case(section: int):
     print(f"\n📂 Creating new case for Section {section}...")
     case = await generate_case(1, [section])
@@ -296,7 +274,8 @@ async def run_cases_for_section(section: int):
     max_retries_per_case = 2  # Maximum number of immediate retries per case
 
     # First, process all details-only cases (highest priority)
-    print(f"\n🔍 Processing {len(details_only)} details-only cases for Section {section}...")
+    if len(details_only) > 0:
+        print(f"\n🔍 Processing {len(details_only)} details-only cases for Section {section}...")
     for case in details_only:
         case_id = case.get('_id')
         success = False
@@ -308,14 +287,17 @@ async def run_cases_for_section(section: int):
                 success = await generate_arguments_for_case(case)
                 did_work = True
                 
-                if success:
+                if success is True:
                     print(f"✅ Successfully processed details-only case {case_id}")
                     break
-                else:
+                elif success is False:
                     print(f"⚠️ Case {case_id} needs another attempt")
                     retries += 1
                     # Wait a bit before retrying
                     await asyncio.sleep(5)
+                elif success is None:
+                    print(f"⚠️ Case {case_id} skipped for now (initial generation failed or rate limit hit).")
+                    break
             except SystemExit:
                 # If SystemExit is raised during processing an incomplete case,
                 # it means we ran out of keys/models. Re-raise to terminate the pipeline.
@@ -329,7 +311,8 @@ async def run_cases_for_section(section: int):
             print(f"⛔ Failed to process details-only case {case_id} after {max_retries_per_case} attempts")
     
     # Then, process all in-progress cases (second priority)
-    print(f"\n🔍 Processing {len(in_progress)} in-progress cases for Section {section}...")
+    if len(in_progress) > 0:
+        print(f"\n🔍 Processing {len(in_progress)} in-progress cases for Section {section}...")
     for case in in_progress:
         case_id = case.get('_id')
         success = False
@@ -341,14 +324,17 @@ async def run_cases_for_section(section: int):
                 success = await generate_arguments_for_case(case)
                 did_work = True
                 
-                if success:
+                if success is True:
                     print(f"✅ Successfully processed in-progress case {case_id}")
                     break
-                else:
+                elif success is False:
                     print(f"⚠️ Case {case_id} needs another attempt")
                     retries += 1
                     # Wait a bit before retrying
                     await asyncio.sleep(5)
+                elif success is None:
+                    print(f"⚠️ Case {case_id} skipped for now (initial generation failed or rate limit hit).")
+                    break
             except SystemExit:
                 # If SystemExit is raised during processing an incomplete case,
                 # it means we ran out of keys/models. Re-raise to terminate the pipeline.
