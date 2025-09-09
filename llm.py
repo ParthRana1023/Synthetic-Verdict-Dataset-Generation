@@ -12,4 +12,4 @@ def get_llm():
         max_tokens=2048
     )
 
-# Models tested: llama-3.3-70b-versatile (best), llama-3.1-8b-instant (good)
+# Models tested: llama-3.3-70b-versatile (best), llama-3.1-8b-instant (good) deepseek-ai/DeepSeek-R1
