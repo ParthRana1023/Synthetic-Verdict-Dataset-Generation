@@ -1,4 +1,4 @@
-name: Run Courtroom Pipeline
+name: Run Judgement Generation Pipeline
 
 on:
   workflow_dispatch:
